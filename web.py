@@ -5,17 +5,12 @@ import redis
 import tornado.ioloop
 import tornado.web
 import tornado.websocket
-
 from tornado.options import define, options, parse_command_line
+from LimitOrderBook import LimitOrderBook as lob
 
 define("port", default=8888, type=int)
-valid_names = set(['oleg', 'alfred', 'andrei'])
 
 """
-valid json:
-    {"name":"anyname", "side":"ask" or "bid", "price":integer, "amount":integer}
-"""
-con = redis.Redis('localhost', port=6379)
 
 
 class IndexHandler(tornado.web.RequestHandler):
@@ -29,39 +24,43 @@ class WebSocketHandler(tornado.websocket.WebSocketHandler):
         self.write_message("Welcome!")
 
     def on_message(self, message):
+        con = lob(self.application.con)
         order = json.loads(message)
-        if 'name' in order and order['name'] in valid_names:
-            if order['side'] == 'ask':
-               supply = con.zrevrangebyscore('bid', order['price'],0, withscores=True)
-               if len(supply) == 0:
-                   con.zadd('ask', {order['name']:order['price']})
-                   self.write_message('your order has been added to the limit book')
-               else:
-                   trade = supply[-1]
-                   con.zrem('bid', trade[0])
-                   self.write_message('you bought from: ' + str(trade[0]) + ' price:' + str(trade[1]))
-            elif order['side'] == 'bid':
-                supply = con.zrevrangebyscore('ask', 99999,order['price'], withscores=True)
-                if len(supply) == 0:
-                   con.zadd('bid', {order['name']:order['price']})
-                   self.write_message('your order has been added to the limit book')
-                else:
-                   trade = supply[0]
-                   con.zrem('ask', trade[0])
-                   self.write_message('you bought from: ' + str(trade[0]) + ' price:' + str(trade[1]))
-
+        if con.validate_order(order):
+            self.application.clientPool[order['ident']] = self
+            trade = con.handle_order(order)  
+            if 'added' in trade:
+                self.write_message(json.dumps(trade))
+            else:
+                try:
+                    value = self.application.clientPool[trade['ident']]
+                    print(self.application.clientPool)
+                    trade_msg = {'ident': order['ident'], 'price': trade['price']}
+                    value.ws_connection.write_message(json.dumps(trade_msg))
+                    self.write_message(json.dumps(trade))
+                    repeat = False
+                except KeyError:
+                    self.write_message('failed')
     def on_close(self):
-        print("Connection closed")
+        for key in self.application.clientPool.keys():
+            if self.application.clientPool[key] == self:
+                self.application.clientPool[key] = None
 
     def check_origin(self, origin):
         return True
 
+class Application(tornado.web.Application):
+    def __init__(self):
+        self.clientPool = {}
+        self.con = redis.Redis('localhost', port=6379)
+        handlers = (
+                (r'/', IndexHandler),
+                (r'/ws/', WebSocketHandler)
+        )
+        
+        tornado.web.Application.__init__(self, handlers)
 
-app = tornado.web.Application([
-    (r'/', IndexHandler),
-    (r'/ws/', WebSocketHandler),
-])
-
+app = Application()
 
 if __name__ == '__main__':
     app.listen(options.port)
