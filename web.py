@@ -10,8 +10,6 @@ from LimitOrderBook import LimitOrderBook as lob
 
 define("port", default=8888, type=int)
 
-"""
-
 
 class IndexHandler(tornado.web.RequestHandler):
     def get(self):
@@ -38,7 +36,6 @@ class WebSocketHandler(tornado.websocket.WebSocketHandler):
                     trade_msg = {'ident': order['ident'], 'price': trade['price']}
                     value.ws_connection.write_message(json.dumps(trade_msg))
                     self.write_message(json.dumps(trade))
-                    repeat = False
                 except KeyError:
                     self.write_message('failed')
     def on_close(self):
