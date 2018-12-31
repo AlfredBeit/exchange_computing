@@ -24,20 +24,31 @@ class WebSocketHandler(tornado.websocket.WebSocketHandler):
     def on_message(self, message):
         con = lob(self.application.con)
         order = json.loads(message)
+        
         if con.validate_order(order):
             self.application.clientPool[order['ident']] = self
-            trade = con.handle_order(order)  
+            trade = con.handle_order(order)
+            
             if 'added' in trade:
                 self.write_message(json.dumps(trade))
             else:
+                
                 try:
-                    value = self.application.clientPool[trade['ident']]
-                    print(self.application.clientPool)
-                    trade_msg = {'ident': order['ident'], 'price': trade['price']}
-                    value.ws_connection.write_message(json.dumps(trade_msg))
-                    self.write_message(json.dumps(trade))
+                    
+                    for key in self.application.clientPool.keys():
+                        user = self.application.clientPool[key]
+                        if user != None:
+                            if user == self:
+                                trade_msg = trade
+                            elif key == trade['ident']:
+                                trade_msg = {'ident': order['ident'], 'price': trade['price']}
+                            else:
+                                trade_msg = {'price': trade['price']}
+                            user.ws_connection.write_message(json.dumps(trade_msg))
+                                
                 except KeyError:
                     self.write_message('failed')
+
     def on_close(self):
         for key in self.application.clientPool.keys():
             if self.application.clientPool[key] == self:
